@@ -51,7 +51,7 @@ function makeConfig(stateDir: string): RelayConfig {
     sendRateLimitMax: 100,
     apnsTeamId: "TEAM123",
     apnsKeyId: "KEY123",
-    apnsPrivateKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+    apnsPrivateKey: "test-private-key",
     appleReceiptSharedSecret: undefined,
   };
 }
