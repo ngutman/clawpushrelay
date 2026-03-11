@@ -1,0 +1,38 @@
+{
+  "name": "clawpushrelay",
+  "version": "0.1.0",
+  "description": "Standalone APNs relay for official OpenClaw iOS builds",
+  "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ngutman/clawpushrelay.git"
+  },
+  "homepage": "https://github.com/ngutman/clawpushrelay#readme",
+  "bugs": {
+    "url": "https://github.com/ngutman/clawpushrelay/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "start:dev": "node --import tsx src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "5.8.2",
+    "node-app-attest": "1.0.1",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.4.0",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
