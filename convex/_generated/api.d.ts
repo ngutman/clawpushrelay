@@ -12,6 +12,7 @@ import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as relay_cleanup from "../relay/cleanup.js";
 import type * as relay_config from "../relay/config.js";
+import type * as relay_gatewayAuth from "../relay/gatewayAuth.js";
 import type * as relay_hashes from "../relay/hashes.js";
 import type * as relay_http from "../relay/http.js";
 import type * as relay_internal from "../relay/internal.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   "relay/cleanup": typeof relay_cleanup;
   "relay/config": typeof relay_config;
+  "relay/gatewayAuth": typeof relay_gatewayAuth;
   "relay/hashes": typeof relay_hashes;
   "relay/http": typeof relay_http;
   "relay/internal": typeof relay_internal;

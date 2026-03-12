@@ -1,3 +1,5 @@
+"use node";
+
 import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
