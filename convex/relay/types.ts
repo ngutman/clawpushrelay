@@ -34,6 +34,8 @@ export type RelayRegistrationRecord = {
   bundleId: string;
   environment: PushEnvironment;
   distribution: Distribution;
+  gatewayDeviceId: string;
+  gatewayPublicKey: string;
   apnsTopic: string;
   apnsTokenCiphertext: string;
   apnsTokenHash: string;
@@ -60,6 +62,10 @@ export type RegisterRequestBody = {
   bundleId: string;
   environment: PushEnvironment;
   distribution: Distribution;
+  gateway: {
+    deviceId: string;
+    publicKey: string;
+  };
   appVersion: string;
   apnsToken: string;
   appAttest: {
@@ -98,6 +104,12 @@ export type SendRequestBody = {
   pushType: PushType;
   priority: 5 | 10;
   payload: Record<string, unknown>;
+};
+
+export type SendGatewayAuth = {
+  deviceId: string;
+  signature: string;
+  signedAtMs: number;
 };
 
 export type RelaySendResult = {

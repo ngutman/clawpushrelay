@@ -18,6 +18,8 @@ function makeRegistration(
     bundleId: "ai.openclaw.client",
     environment: "production",
     distribution: "official",
+    gatewayDeviceId: "gateway-device-1",
+    gatewayPublicKey: "gateway-public-key-1",
     apnsTopic: "ai.openclaw.client",
     apnsTokenCiphertext: "ciphertext",
     apnsTokenHash: "token-hash",

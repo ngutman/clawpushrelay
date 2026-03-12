@@ -49,6 +49,8 @@ const registrationRecordValidator = v.object({
   bundleId: v.string(),
   environment: v.literal("production"),
   distribution: v.literal("official"),
+  gatewayDeviceId: v.string(),
+  gatewayPublicKey: v.string(),
   apnsTopic: v.string(),
   apnsTokenCiphertext: v.string(),
   apnsTokenHash: v.string(),
@@ -77,9 +79,14 @@ type StoredDoc<T> = T & { _id: any };
 type RateLimitEvent = {
   scope: RateLimitScope;
   subjectHash: string;
+  scopeSubjectHash: string;
   createdAtMs: number;
   expiresAtMs: number;
 };
+
+function buildRateLimitScopeSubjectHash(scope: RateLimitScope, subjectHash: string): string {
+  return `${scope}:${subjectHash}`;
+}
 
 export function buildChallengeRecord(params: {
   challengeId: string;
@@ -150,6 +157,7 @@ export function consumeRateLimit(
     nextEvent: {
       scope: params.scope,
       subjectHash: params.subjectHash,
+      scopeSubjectHash: buildRateLimitScopeSubjectHash(params.scope, params.subjectHash),
       createdAtMs: params.nowMs,
       expiresAtMs: params.nowMs + params.windowMs,
     },
@@ -284,10 +292,10 @@ export const consumeRateLimitInternal = internalMutation({
     const cutoff = args.nowMs - args.windowMs;
     const activeEvents = ((await ctx.db
       .query("rate_limit_events")
-      .withIndex("by_scope_subject_created_at", (q) => q.eq("scope", args.scope))
-      .collect()) as RateLimitEvent[]).filter(
-      (event) => event.subjectHash === args.subjectHash && event.createdAtMs > cutoff,
-    );
+      .withIndex("by_scope_subject_key_created_at", (q) =>
+        q.eq("scopeSubjectHash", buildRateLimitScopeSubjectHash(args.scope, args.subjectHash)),
+      )
+      .collect()) as RateLimitEvent[]).filter((event) => event.createdAtMs > cutoff);
 
     const result = consumeRateLimit(activeEvents, args);
     if (!result.allowed || !result.nextEvent) {
@@ -312,10 +320,10 @@ export const issueChallengeAndConsumeRateLimitInternal = internalMutation({
     const cutoff = args.nowMs - args.windowMs;
     const activeEvents = ((await ctx.db
       .query("rate_limit_events")
-      .withIndex("by_scope_subject_created_at", (q) => q.eq("scope", "challenge"))
-      .collect()) as RateLimitEvent[]).filter(
-      (event) => event.subjectHash === args.subjectHash && event.createdAtMs > cutoff,
-    );
+      .withIndex("by_scope_subject_key_created_at", (q) =>
+        q.eq("scopeSubjectHash", buildRateLimitScopeSubjectHash("challenge", args.subjectHash)),
+      )
+      .collect()) as RateLimitEvent[]).filter((event) => event.createdAtMs > cutoff);
     const rateLimit = consumeRateLimit(activeEvents, {
       scope: "challenge",
       subjectHash: args.subjectHash,
@@ -360,10 +368,10 @@ export const consumeChallengeAndRegisterRateLimitInternal = internalMutation({
     const cutoff = args.nowMs - args.windowMs;
     const activeEvents = ((await ctx.db
       .query("rate_limit_events")
-      .withIndex("by_scope_subject_created_at", (q) => q.eq("scope", "register"))
-      .collect()) as RateLimitEvent[]).filter(
-      (event) => event.subjectHash === args.subjectHash && event.createdAtMs > cutoff,
-    );
+      .withIndex("by_scope_subject_key_created_at", (q) =>
+        q.eq("scopeSubjectHash", buildRateLimitScopeSubjectHash("register", args.subjectHash)),
+      )
+      .collect()) as RateLimitEvent[]).filter((event) => event.createdAtMs > cutoff);
     const rateLimit = consumeRateLimit(activeEvents, {
       scope: "register",
       subjectHash: args.subjectHash,
@@ -416,10 +424,10 @@ export const consumeSendRateLimitInternal = internalMutation({
     const cutoff = args.nowMs - args.windowMs;
     const activeEvents = ((await ctx.db
       .query("rate_limit_events")
-      .withIndex("by_scope_subject_created_at", (q) => q.eq("scope", "send"))
-      .collect()) as RateLimitEvent[]).filter(
-      (event) => event.subjectHash === args.subjectHash && event.createdAtMs > cutoff,
-    );
+      .withIndex("by_scope_subject_key_created_at", (q) =>
+        q.eq("scopeSubjectHash", buildRateLimitScopeSubjectHash("send", args.subjectHash)),
+      )
+      .collect()) as RateLimitEvent[]).filter((event) => event.createdAtMs > cutoff);
     const result = consumeRateLimit(activeEvents, {
       scope: "send",
       subjectHash: args.subjectHash,

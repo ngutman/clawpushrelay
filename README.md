@@ -36,6 +36,7 @@ Set these on the Convex deployment, not in application code:
 - `APNS_KEY_ID`
 - `APNS_P8`
   APNs auth key contents as a single string. Escaped `\n` sequences are normalized at runtime.
+  Quoted dotenv-style values are also accepted.
 - `APPLE_RECEIPT_SECRET`
   Optional. Only needed if your receipt validation flow requires the shared secret.
 - `HANDLE_TTL_MS`
@@ -51,7 +52,7 @@ Set these on the Convex deployment, not in application code:
 - `SEND_RATE_LIMIT_MAX`
   Optional. Default: `120`.
 
-See [.env.example](/Users/guti/projects/clawpushrelay/.env.example) for a template.
+See `.env.example` for a template.
 
 ## Local Development
 

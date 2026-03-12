@@ -1,6 +1,12 @@
+import { generateKeyPairSync, sign as signPayload } from "node:crypto";
 import { getFunctionName } from "convex/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import http from "./http.js";
+import {
+  buildGatewaySignaturePayload,
+  deriveGatewayDeviceId,
+  publicKeyRawBase64UrlFromPem,
+} from "./relay/gatewayAuth.js";
 import { hashSha256 } from "./relay/hashes.js";
 import type {
   RegisterRequestBody,
@@ -54,12 +60,23 @@ function lookupHandler(path: string, method: "GET" | "POST") {
 function makeRegisterPayload(
   overrides: Partial<RegisterRequestBody> = {},
 ): RegisterRequestBody {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const gatewayPublicKey = publicKeyRawBase64UrlFromPem(publicKeyPem);
+  const gatewayDeviceId = deriveGatewayDeviceId(gatewayPublicKey);
+  if (!gatewayDeviceId) {
+    throw new Error("failed to derive gateway device id");
+  }
   return {
     challengeId: "challenge-1",
     installationId: "install-1",
     bundleId: "ai.openclaw.client",
     environment: "production",
     distribution: "official",
+    gateway: {
+      deviceId: gatewayDeviceId,
+      publicKey: gatewayPublicKey,
+    },
     appVersion: "2026.3.12",
     apnsToken: "1234567890abcdef1234567890abcdef",
     appAttest: {
@@ -90,6 +107,52 @@ function makeSendPayload(overrides: Partial<SendRequestBody> = {}): SendRequestB
       },
     },
     ...overrides,
+  };
+}
+
+function makeGatewayIdentity() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const gatewayPublicKey = publicKeyRawBase64UrlFromPem(publicKeyPem);
+  const gatewayDeviceId = deriveGatewayDeviceId(gatewayPublicKey);
+  if (!gatewayDeviceId) {
+    throw new Error("failed to derive gateway device id");
+  }
+  return {
+    deviceId: gatewayDeviceId,
+    publicKey: gatewayPublicKey,
+    privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+  };
+}
+
+function makeGatewayHeaders(params: {
+  body: SendRequestBody;
+  gatewayIdentity: ReturnType<typeof makeGatewayIdentity>;
+  signedAtMs: number;
+}) {
+  const rawBody = JSON.stringify(params.body);
+  const payload = buildGatewaySignaturePayload({
+    gatewayDeviceId: params.gatewayIdentity.deviceId,
+    signedAtMs: params.signedAtMs,
+    bodyText: rawBody,
+  });
+  const signature = signPayload(
+    null,
+    Buffer.from(payload, "utf8"),
+    params.gatewayIdentity.privateKeyPem,
+  )
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/g, "");
+  return {
+    rawBody,
+    headers: {
+      authorization: "Bearer send-grant-1",
+      "x-openclaw-gateway-device-id": params.gatewayIdentity.deviceId,
+      "x-openclaw-gateway-signature": signature,
+      "x-openclaw-gateway-signed-at-ms": String(params.signedAtMs),
+    },
   };
 }
 
@@ -458,6 +521,12 @@ describe("convex HTTP routes", () => {
 
     const handler = lookupHandler("/v1/push/send", "POST");
     const payload = makeSendPayload();
+    const gatewayIdentity = makeGatewayIdentity();
+    const gatewayHeaders = makeGatewayHeaders({
+      body: payload,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const sendResult: RelaySendResult = {
       ok: true,
       status: 200,
@@ -476,11 +545,11 @@ describe("convex HTTP routes", () => {
       new Request("https://relay.test/v1/push/send", {
         method: "POST",
         headers: {
-          authorization: "Bearer send-grant-1",
           "content-type": "application/json",
           "x-forwarded-for": "203.0.113.10, 10.0.0.1",
+          ...gatewayHeaders.headers,
         },
-        body: JSON.stringify(payload),
+        body: gatewayHeaders.rawBody,
       }),
     );
 
@@ -503,6 +572,12 @@ describe("convex HTTP routes", () => {
     expect(runAction.mock.calls[0]![1]).toEqual({
       request: payload,
       sendGrant: "send-grant-1",
+      gatewayAuth: {
+        deviceId: gatewayIdentity.deviceId,
+        signature: gatewayHeaders.headers["x-openclaw-gateway-signature"],
+        signedAtMs: 1_700_000_000_000,
+      },
+      rawBody: gatewayHeaders.rawBody,
     });
   });
 
@@ -546,6 +621,13 @@ describe("convex HTTP routes", () => {
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
 
     const handler = lookupHandler("/v1/push/send", "POST");
+    const payload = makeSendPayload();
+    const gatewayIdentity = makeGatewayIdentity();
+    const gatewayHeaders = makeGatewayHeaders({
+      body: payload,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const runMutation = vi.fn().mockResolvedValue({
       allowed: true,
       remaining: 119,
@@ -560,11 +642,12 @@ describe("convex HTTP routes", () => {
       new Request("https://relay.test/v1/push/send", {
         method: "POST",
         headers: {
-          authorization: "Bearer wrong-grant",
           "content-type": "application/json",
           "x-real-ip": "198.51.100.22",
+          ...gatewayHeaders.headers,
+          authorization: "Bearer wrong-grant",
         },
-        body: JSON.stringify(makeSendPayload()),
+        body: gatewayHeaders.rawBody,
       }),
     );
 

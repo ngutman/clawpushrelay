@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { deriveGatewayDeviceId, publicKeyRawBase64UrlFromPem } from "./gatewayAuth.js";
 import {
   parseRegisterRequest,
   parseSendRequest,
   validatePushPayload,
 } from "./validators.js";
 import type { SendRequestBody } from "./types.js";
+import { generateKeyPairSync } from "node:crypto";
 
 function makeSendBody(overrides: Partial<SendRequestBody> = {}): SendRequestBody {
   return {
@@ -25,12 +27,23 @@ function makeSendBody(overrides: Partial<SendRequestBody> = {}): SendRequestBody
 
 describe("request validators", () => {
   it("accepts a valid register payload", () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+    const gatewayPublicKey = publicKeyRawBase64UrlFromPem(publicKeyPem);
+    const gatewayDeviceId = deriveGatewayDeviceId(gatewayPublicKey);
+    if (!gatewayDeviceId) {
+      throw new Error("failed to derive gateway device id");
+    }
     const body = parseRegisterRequest({
       challengeId: "challenge-1",
       installationId: "install-1",
       bundleId: "ai.openclaw.client",
       environment: "production",
       distribution: "official",
+      gateway: {
+        deviceId: gatewayDeviceId,
+        publicKey: gatewayPublicKey,
+      },
       appVersion: "1.0.0",
       apnsToken: "1234567890abcdef1234567890abcdef",
       appAttest: {
@@ -56,6 +69,10 @@ describe("request validators", () => {
         bundleId: "ai.openclaw.client",
         environment: "sandbox",
         distribution: "official",
+        gateway: {
+          deviceId: "gateway-device-1",
+          publicKey: "public-key",
+        },
         appVersion: "1.0.0",
         apnsToken: "not-a-token",
         appAttest: {

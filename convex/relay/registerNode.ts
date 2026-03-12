@@ -5,6 +5,7 @@ import { anyApi, internalActionGeneric } from "convex/server";
 import { v } from "convex/values";
 import { verifyAssertion, verifyAttestation } from "node-app-attest";
 import { loadRelayConfig } from "./config.js";
+import { deriveGatewayDeviceId, normalizeGatewayPublicKey } from "./gatewayAuth.js";
 import { apnsTokenSuffix, encodeSha256Base64Url, normalizeApnsToken } from "./hashes.js";
 import { encryptString, hashSha256Sync, parseEncryptionKey, randomOpaqueToken } from "./nodeCrypto.js";
 import type {
@@ -25,6 +26,10 @@ const registerRequestValidator = v.object({
   bundleId: v.string(),
   environment: v.literal("production"),
   distribution: v.literal("official"),
+  gateway: v.object({
+    deviceId: v.string(),
+    publicKey: v.string(),
+  }),
   appVersion: v.string(),
   apnsToken: v.string(),
   appAttest: v.object({
@@ -89,9 +94,13 @@ async function verifyReceipt(params: {
   if (!receiptBundleId || receiptBundleId !== params.bundleId) {
     throw new ReceiptVerificationError("receipt bundle id mismatch");
   }
+  const receiptEnvironment = result.environment?.trim();
+  if (receiptEnvironment !== "Production" && receiptEnvironment !== "Sandbox") {
+    throw new ReceiptVerificationError("receipt environment invalid");
+  }
 
   return {
-    environment: result.environment ?? "unknown",
+    environment: receiptEnvironment,
     bundleId: receiptBundleId,
   };
 }
@@ -151,6 +160,10 @@ async function verifyAppAttest(params: {
     bundleId: string;
     environment: string;
     distribution: string;
+    gateway: {
+      deviceId: string;
+      publicKey: string;
+    };
     appVersion: string;
     apnsToken: string;
   }>;
@@ -167,6 +180,8 @@ async function verifyAppAttest(params: {
     parsedPayload.bundleId !== params.request.bundleId ||
     parsedPayload.environment !== params.request.environment ||
     parsedPayload.distribution !== params.request.distribution ||
+    parsedPayload.gateway?.deviceId !== params.request.gateway.deviceId ||
+    parsedPayload.gateway?.publicKey !== params.request.gateway.publicKey ||
     parsedPayload.appVersion !== params.request.appVersion ||
     normalizeApnsToken(parsedPayload.apnsToken ?? "") !== normalizeApnsToken(params.request.apnsToken)
   ) {
@@ -254,6 +269,8 @@ function buildRegistrationRecord(params: {
     bundleId: params.request.bundleId,
     environment: params.request.environment,
     distribution: params.request.distribution,
+    gatewayDeviceId: params.request.gateway.deviceId,
+    gatewayPublicKey: params.request.gateway.publicKey,
     apnsTopic: params.request.bundleId,
     apnsTokenCiphertext: encryptString(normalizedToken, params.encryptionKey),
     apnsTokenHash: hashSha256Sync(normalizedToken),
@@ -300,6 +317,24 @@ export const verifyAndPersistRegistrationInternal = internalAction({
         bundleId: args.request.bundleId,
         sharedSecret: config.appleReceiptSharedSecret,
       });
+      const normalizedGatewayPublicKey = normalizeGatewayPublicKey(args.request.gateway.publicKey);
+      if (!normalizedGatewayPublicKey) {
+        return {
+          ok: false,
+          error: "unauthorized",
+          message: "gateway public key invalid",
+        };
+      }
+      const derivedGatewayDeviceId = deriveGatewayDeviceId(normalizedGatewayPublicKey);
+      if (!derivedGatewayDeviceId || derivedGatewayDeviceId !== args.request.gateway.deviceId.trim()) {
+        return {
+          ok: false,
+          error: "unauthorized",
+          message: "gateway device identity mismatch",
+        };
+      }
+      args.request.gateway.publicKey = normalizedGatewayPublicKey;
+      args.request.gateway.deviceId = derivedGatewayDeviceId;
 
       const relayHandle = randomOpaqueToken(32);
       const sendGrant = randomOpaqueToken(32);

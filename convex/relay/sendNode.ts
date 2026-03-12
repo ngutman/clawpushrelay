@@ -5,6 +5,7 @@ import http2 from "node:http2";
 import { anyApi, internalActionGeneric } from "convex/server";
 import type { GenericActionCtx } from "convex/server";
 import { v } from "convex/values";
+import { buildGatewaySignaturePayload, verifyGatewaySignature } from "./gatewayAuth.js";
 import { apnsTokenSuffix, normalizeApnsToken } from "./hashes.js";
 import { decryptString, hashSha256Sync, parseEncryptionKey } from "./nodeCrypto.js";
 import { loadRelayConfig } from "./config.js";
@@ -13,6 +14,7 @@ import type {
   PushType,
   RelayRegistrationRecord,
   RelaySendResult,
+  SendGatewayAuth,
   SendRequestBody,
 } from "./types.js";
 
@@ -20,9 +22,16 @@ const internalAction = internalActionGeneric;
 
 const APNS_JWT_TTL_MS = 50 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_GATEWAY_SIGNATURE_AGE_MS = 5 * 60 * 1000;
 
 const sendRequestValidator = v.object({
   sendGrant: v.string(),
+  gatewayAuth: v.object({
+    deviceId: v.string(),
+    signature: v.string(),
+    signedAtMs: v.number(),
+  }),
+  rawBody: v.string(),
   request: v.object({
     relayHandle: v.string(),
     pushType: v.union(v.literal("alert"), v.literal("background")),
@@ -89,6 +98,10 @@ function hasMatchingSendGrant(params: {
     return false;
   }
   return timingSafeEqual(provided, expected);
+}
+
+function hasFreshGatewaySignature(signedAtMs: number, nowMs: number): boolean {
+  return Math.abs(nowMs - signedAtMs) <= MAX_GATEWAY_SIGNATURE_AGE_MS;
 }
 
 function toBase64UrlBytes(value: Uint8Array): string {
@@ -264,6 +277,8 @@ export async function sendPush(
   ctx: Pick<GenericActionCtx<any>, "runQuery" | "runMutation">,
   args: {
     sendGrant: string;
+    gatewayAuth: SendGatewayAuth;
+    rawBody: string;
     request: SendRequestBody;
   },
   deps: SendPushDeps = {},
@@ -288,6 +303,50 @@ export async function sendPush(
   }
 
   const nowMs = now();
+  if (registration.gatewayDeviceId !== args.gatewayAuth.deviceId.trim()) {
+    return {
+      unauthorized: true,
+      message: "gateway device id mismatch",
+    };
+  }
+  if (!hasFreshGatewaySignature(args.gatewayAuth.signedAtMs, nowMs)) {
+    return {
+      unauthorized: true,
+      message: "gateway signature expired",
+    };
+  }
+  const gatewaySignaturePayload = buildGatewaySignaturePayload({
+    gatewayDeviceId: registration.gatewayDeviceId,
+    signedAtMs: args.gatewayAuth.signedAtMs,
+    bodyText: args.rawBody,
+  });
+  if (
+    !verifyGatewaySignature({
+      publicKey: registration.gatewayPublicKey,
+      payload: gatewaySignaturePayload,
+      signature: args.gatewayAuth.signature,
+    })
+  ) {
+    return {
+      unauthorized: true,
+      message: "gateway signature invalid",
+    };
+  }
+  const sendRateLimit = await ctx.runMutation(anyApi.relay.internal.consumeSendRateLimitInternal, {
+    subjectHash: hashSha256Sync(`${registration.gatewayDeviceId}:${relayHandleHash}`),
+    nowMs,
+    windowMs: config.rateLimitWindowMs,
+    limit: config.sendRateLimitMax,
+  });
+  if (!sendRateLimit.allowed) {
+    return {
+      ok: false,
+      status: 429,
+      reason: "rate limit exceeded",
+      environment: registration.environment,
+      tokenSuffix: registration.tokenSuffix,
+    };
+  }
   if (registration.status !== "active") {
     await ctx.runMutation(anyApi.relay.internal.markRegistrationStatusInternal, {
       relayHandleHash,

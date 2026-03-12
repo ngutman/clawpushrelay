@@ -31,6 +31,8 @@ const registrations = defineTable({
   bundleId: v.string(),
   environment: v.literal("production"),
   distribution: v.literal("official"),
+  gatewayDeviceId: v.string(),
+  gatewayPublicKey: v.string(),
   apnsTopic: v.string(),
   apnsTokenCiphertext: v.string(),
   apnsTokenHash: v.string(),
@@ -63,10 +65,11 @@ const registrations = defineTable({
 const rateLimitEvents = defineTable({
   scope: v.union(v.literal("challenge"), v.literal("register"), v.literal("send")),
   subjectHash: v.string(),
+  scopeSubjectHash: v.string(),
   createdAtMs: v.number(),
   expiresAtMs: v.number(),
 })
-  .index("by_scope_subject_created_at", ["scope", "subjectHash", "createdAtMs"])
+  .index("by_scope_subject_key_created_at", ["scopeSubjectHash", "createdAtMs"])
   .index("by_expires_at", ["expiresAtMs"]);
 
 export default defineSchema({

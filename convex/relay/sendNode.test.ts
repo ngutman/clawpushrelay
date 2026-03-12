@@ -1,9 +1,20 @@
+import { generateKeyPairSync, sign as signPayload } from "node:crypto";
 import { getFunctionName } from "convex/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildGatewaySignaturePayload,
+  deriveGatewayDeviceId,
+  publicKeyRawBase64UrlFromPem,
+} from "./gatewayAuth.js";
 import { apnsTokenSuffix, normalizeApnsToken } from "./hashes.js";
 import { encryptString, hashSha256Sync, parseEncryptionKey } from "./nodeCrypto.js";
 import { sendPush } from "./sendNode.js";
-import type { RelayRegistrationRecord, RelaySendResult, SendRequestBody } from "./types.js";
+import type {
+  RelayRegistrationRecord,
+  RelaySendResult,
+  SendGatewayAuth,
+  SendRequestBody,
+} from "./types.js";
 
 const REQUIRED_ENV: Record<string, string> = {
   RELAY_ENC_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -61,6 +72,13 @@ function makeRegistration(
   const apnsToken = normalizeApnsToken("1234567890ABCDEF1234567890ABCDEF");
   const sendGrant = "send-grant-1";
   const key = parseEncryptionKey(REQUIRED_ENV.RELAY_ENC_KEY);
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const gatewayPublicKey = publicKeyRawBase64UrlFromPem(publicKeyPem);
+  const gatewayDeviceId = deriveGatewayDeviceId(gatewayPublicKey);
+  if (!gatewayDeviceId) {
+    throw new Error("failed to derive gateway device id");
+  }
 
   return {
     registrationId: "reg-1",
@@ -68,6 +86,8 @@ function makeRegistration(
     bundleId: "ai.openclaw.client",
     environment: "production",
     distribution: "official",
+    gatewayDeviceId,
+    gatewayPublicKey,
     apnsTopic: "ai.openclaw.client",
     apnsTokenCiphertext: encryptString(apnsToken, key),
     apnsTokenHash: hashSha256Sync(apnsToken),
@@ -87,6 +107,51 @@ function makeRegistration(
   };
 }
 
+function makeGatewayIdentity() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const gatewayPublicKey = publicKeyRawBase64UrlFromPem(publicKeyPem);
+  const gatewayDeviceId = deriveGatewayDeviceId(gatewayPublicKey);
+  if (!gatewayDeviceId) {
+    throw new Error("failed to derive gateway device id");
+  }
+  return {
+    deviceId: gatewayDeviceId,
+    publicKey: gatewayPublicKey,
+    privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+  };
+}
+
+function signGatewayAuth(params: {
+  request: SendRequestBody;
+  gatewayIdentity: ReturnType<typeof makeGatewayIdentity>;
+  signedAtMs: number;
+}): { rawBody: string; gatewayAuth: SendGatewayAuth } {
+  const rawBody = JSON.stringify(params.request);
+  const payload = buildGatewaySignaturePayload({
+    gatewayDeviceId: params.gatewayIdentity.deviceId,
+    signedAtMs: params.signedAtMs,
+    bodyText: rawBody,
+  });
+  const signature = signPayload(
+    null,
+    Buffer.from(payload, "utf8"),
+    params.gatewayIdentity.privateKeyPem,
+  )
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/g, "");
+  return {
+    rawBody,
+    gatewayAuth: {
+      deviceId: params.gatewayIdentity.deviceId,
+      signature,
+      signedAtMs: params.signedAtMs,
+    },
+  };
+}
+
 describe("sendPush", () => {
   afterEach(() => {
     restoreEnv();
@@ -96,9 +161,21 @@ describe("sendPush", () => {
   it("sends a push and records the APNs result", async () => {
     setRequiredEnv();
     const request = makeSendRequest();
-    const registration = makeRegistration();
+    const gatewayIdentity = makeGatewayIdentity();
+    const registration = makeRegistration({
+      gatewayDeviceId: gatewayIdentity.deviceId,
+      gatewayPublicKey: gatewayIdentity.publicKey,
+    });
+    const signed = signGatewayAuth({
+      request,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const runQuery = vi.fn().mockResolvedValue(registration);
-    const runMutation = vi.fn().mockResolvedValue(undefined);
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ allowed: true, remaining: 119 })
+      .mockResolvedValue(undefined);
     const sendResult: RelaySendResult = {
       ok: true,
       status: 200,
@@ -110,7 +187,7 @@ describe("sendPush", () => {
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request, sendGrant: "send-grant-1" },
+      { request, sendGrant: "send-grant-1", gatewayAuth: signed.gatewayAuth, rawBody: signed.rawBody },
       {
         now: () => 1_700_000_000_000,
         makeApnsSender: () => ({
@@ -137,11 +214,20 @@ describe("sendPush", () => {
       priority: request.priority,
     });
 
-    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(runMutation).toHaveBeenCalledTimes(2);
     expect(getFunctionName(runMutation.mock.calls[0]![0])).toBe(
-      "relay/internal:recordSendResultInternal",
+      "relay/internal:consumeSendRateLimitInternal",
     );
     expect(runMutation.mock.calls[0]![1]).toEqual({
+      subjectHash: hashSha256Sync(`${registration.gatewayDeviceId}:${registration.relayHandleHash}`),
+      nowMs: 1_700_000_000_000,
+      windowMs: 60_000,
+      limit: 120,
+    });
+    expect(getFunctionName(runMutation.mock.calls[1]![0])).toBe(
+      "relay/internal:recordSendResultInternal",
+    );
+    expect(runMutation.mock.calls[1]![1]).toEqual({
       relayHandleHash: registration.relayHandleHash,
       result: sendResult,
       nowMs: 1_700_000_000_000,
@@ -150,12 +236,23 @@ describe("sendPush", () => {
 
   it("returns Unregistered for a missing relay handle", async () => {
     setRequiredEnv();
+    const gatewayIdentity = makeGatewayIdentity();
+    const signed = signGatewayAuth({
+      request: makeSendRequest(),
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const runQuery = vi.fn().mockResolvedValue(null);
     const runMutation = vi.fn();
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request: makeSendRequest(), sendGrant: "send-grant-1" },
+      {
+        request: makeSendRequest(),
+        sendGrant: "send-grant-1",
+        gatewayAuth: signed.gatewayAuth,
+        rawBody: signed.rawBody,
+      },
       {
         now: () => 1_700_000_000_000,
       },
@@ -173,16 +270,28 @@ describe("sendPush", () => {
 
   it("expires an active handle that is past its TTL", async () => {
     setRequiredEnv();
+    const gatewayIdentity = makeGatewayIdentity();
     const registration = makeRegistration({
+      gatewayDeviceId: gatewayIdentity.deviceId,
+      gatewayPublicKey: gatewayIdentity.publicKey,
       relayHandleExpiresAtMs: 1_699_999_999_000,
     });
+    const request = makeSendRequest();
+    const signed = signGatewayAuth({
+      request,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const runQuery = vi.fn().mockResolvedValue(registration);
-    const runMutation = vi.fn().mockResolvedValue(undefined);
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ allowed: true, remaining: 119 })
+      .mockResolvedValue(undefined);
     const sendSpy = vi.fn();
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request: makeSendRequest(), sendGrant: "send-grant-1" },
+      { request, sendGrant: "send-grant-1", gatewayAuth: signed.gatewayAuth, rawBody: signed.rawBody },
       {
         now: () => 1_700_000_000_000,
         makeApnsSender: () => ({
@@ -199,11 +308,14 @@ describe("sendPush", () => {
       tokenSuffix: registration.tokenSuffix,
     });
     expect(sendSpy).not.toHaveBeenCalled();
-    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(runMutation).toHaveBeenCalledTimes(2);
     expect(getFunctionName(runMutation.mock.calls[0]![0])).toBe(
+      "relay/internal:consumeSendRateLimitInternal",
+    );
+    expect(getFunctionName(runMutation.mock.calls[1]![0])).toBe(
       "relay/internal:expireRegistrationIfNeededInternal",
     );
-    expect(runMutation.mock.calls[0]![1]).toEqual({
+    expect(runMutation.mock.calls[1]![1]).toEqual({
       relayHandleHash: registration.relayHandleHash,
       nowMs: 1_700_000_000_000,
     });
@@ -212,9 +324,21 @@ describe("sendPush", () => {
   it("records terminal APNs results so BadDeviceToken can stale the registration", async () => {
     setRequiredEnv();
     const request = makeSendRequest();
-    const registration = makeRegistration();
+    const gatewayIdentity = makeGatewayIdentity();
+    const registration = makeRegistration({
+      gatewayDeviceId: gatewayIdentity.deviceId,
+      gatewayPublicKey: gatewayIdentity.publicKey,
+    });
+    const signed = signGatewayAuth({
+      request,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const runQuery = vi.fn().mockResolvedValue(registration);
-    const runMutation = vi.fn().mockResolvedValue(undefined);
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ allowed: true, remaining: 119 })
+      .mockResolvedValue(undefined);
     const sendResult: RelaySendResult = {
       ok: false,
       status: 400,
@@ -226,7 +350,7 @@ describe("sendPush", () => {
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request, sendGrant: "send-grant-1" },
+      { request, sendGrant: "send-grant-1", gatewayAuth: signed.gatewayAuth, rawBody: signed.rawBody },
       {
         now: () => 1_700_000_000_000,
         makeApnsSender: () => ({
@@ -236,11 +360,11 @@ describe("sendPush", () => {
     );
 
     expect(result).toEqual(sendResult);
-    expect(runMutation).toHaveBeenCalledTimes(1);
-    expect(getFunctionName(runMutation.mock.calls[0]![0])).toBe(
+    expect(runMutation).toHaveBeenCalledTimes(2);
+    expect(getFunctionName(runMutation.mock.calls[1]![0])).toBe(
       "relay/internal:recordSendResultInternal",
     );
-    expect(runMutation.mock.calls[0]![1]).toEqual({
+    expect(runMutation.mock.calls[1]![1]).toEqual({
       relayHandleHash: registration.relayHandleHash,
       result: sendResult,
       nowMs: 1_700_000_000_000,
@@ -249,13 +373,23 @@ describe("sendPush", () => {
 
   it("rejects sends with the wrong grant", async () => {
     setRequiredEnv();
-    const registration = makeRegistration();
+    const gatewayIdentity = makeGatewayIdentity();
+    const registration = makeRegistration({
+      gatewayDeviceId: gatewayIdentity.deviceId,
+      gatewayPublicKey: gatewayIdentity.publicKey,
+    });
+    const request = makeSendRequest();
+    const signed = signGatewayAuth({
+      request,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
     const runQuery = vi.fn().mockResolvedValue(registration);
     const runMutation = vi.fn();
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request: makeSendRequest(), sendGrant: "wrong-grant" },
+      { request, sendGrant: "wrong-grant", gatewayAuth: signed.gatewayAuth, rawBody: signed.rawBody },
       {
         now: () => 1_700_000_000_000,
       },
@@ -266,5 +400,78 @@ describe("sendPush", () => {
       message: "missing or invalid relay send grant",
     });
     expect(runMutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects sends from a different gateway identity", async () => {
+    setRequiredEnv();
+    const ownerGateway = makeGatewayIdentity();
+    const attackerGateway = makeGatewayIdentity();
+    const request = makeSendRequest();
+    const registration = makeRegistration({
+      gatewayDeviceId: ownerGateway.deviceId,
+      gatewayPublicKey: ownerGateway.publicKey,
+    });
+    const signed = signGatewayAuth({
+      request,
+      gatewayIdentity: attackerGateway,
+      signedAtMs: 1_700_000_000_000,
+    });
+    const runQuery = vi.fn().mockResolvedValue(registration);
+    const runMutation = vi.fn();
+
+    const result = await sendPush(
+      { runQuery, runMutation },
+      { request, sendGrant: "send-grant-1", gatewayAuth: signed.gatewayAuth, rawBody: signed.rawBody },
+      {
+        now: () => 1_700_000_000_000,
+      },
+    );
+
+    expect(result).toEqual({
+      unauthorized: true,
+      message: "gateway device id mismatch",
+    });
+    expect(runMutation).not.toHaveBeenCalled();
+  });
+
+  it("rate limits authenticated send bursts per gateway/device binding", async () => {
+    setRequiredEnv();
+    const gatewayIdentity = makeGatewayIdentity();
+    const request = makeSendRequest();
+    const registration = makeRegistration({
+      gatewayDeviceId: gatewayIdentity.deviceId,
+      gatewayPublicKey: gatewayIdentity.publicKey,
+    });
+    const signed = signGatewayAuth({
+      request,
+      gatewayIdentity,
+      signedAtMs: 1_700_000_000_000,
+    });
+    const runQuery = vi.fn().mockResolvedValue(registration);
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ allowed: false, remaining: 0 })
+      .mockResolvedValue(undefined);
+    const sendSpy = vi.fn();
+
+    const result = await sendPush(
+      { runQuery, runMutation },
+      { request, sendGrant: "send-grant-1", gatewayAuth: signed.gatewayAuth, rawBody: signed.rawBody },
+      {
+        now: () => 1_700_000_000_000,
+        makeApnsSender: () => ({
+          send: sendSpy,
+        }),
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      status: 429,
+      reason: "rate limit exceeded",
+      environment: "production",
+      tokenSuffix: registration.tokenSuffix,
+    });
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 });

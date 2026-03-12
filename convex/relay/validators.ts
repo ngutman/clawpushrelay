@@ -7,6 +7,10 @@ export const registerRequestSchema = z.object({
   bundleId: z.string().min(1),
   environment: z.literal("production"),
   distribution: z.literal("official"),
+  gateway: z.object({
+    deviceId: z.string().min(1),
+    publicKey: z.string().min(1),
+  }),
   appVersion: z.string().min(1),
   apnsToken: z.string().regex(/^[0-9a-fA-F]{32,}$/),
   appAttest: z.object({

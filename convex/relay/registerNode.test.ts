@@ -10,9 +10,11 @@ vi.mock("node-app-attest", () => ({
 }));
 
 import { encodeSha256Base64Url, normalizeApnsToken } from "./hashes.js";
+import { deriveGatewayDeviceId, publicKeyRawBase64UrlFromPem } from "./gatewayAuth.js";
 import { decryptString, hashSha256Sync, parseEncryptionKey } from "./nodeCrypto.js";
 import { verifyAndPersistRegistrationInternal } from "./registerNode.js";
 import type { RegisterRequestBody } from "./types.js";
+import { generateKeyPairSync } from "node:crypto";
 
 const REQUIRED_ENV: Record<string, string> = {
   RELAY_ENC_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -61,12 +63,23 @@ function restoreEnv(): void {
 }
 
 async function makeRegisterRequest(): Promise<RegisterRequestBody> {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const gatewayPublicKey = publicKeyRawBase64UrlFromPem(publicKeyPem);
+  const gatewayDeviceId = deriveGatewayDeviceId(gatewayPublicKey);
+  if (!gatewayDeviceId) {
+    throw new Error("failed to derive test gateway device id");
+  }
   const request: RegisterRequestBody = {
     challengeId: "challenge-1",
     installationId: "install-1",
     bundleId: "ai.openclaw.client",
     environment: "production",
     distribution: "official",
+    gateway: {
+      deviceId: gatewayDeviceId,
+      publicKey: gatewayPublicKey,
+    },
     appVersion: "2026.3.12",
     apnsToken: "1234567890ABCDEF1234567890ABCDEF",
     appAttest: {
@@ -87,6 +100,7 @@ async function makeRegisterRequest(): Promise<RegisterRequestBody> {
     bundleId: request.bundleId,
     environment: request.environment,
     distribution: request.distribution,
+    gateway: request.gateway,
     appVersion: request.appVersion,
     apnsToken: request.apnsToken,
   });

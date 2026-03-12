@@ -6,6 +6,7 @@ import type {
   ChallengeRecord,
   RegisterActionResult,
   RelaySendResult,
+  SendGatewayAuth,
   SendRequestBody,
 } from "./types.js";
 
@@ -81,17 +82,17 @@ function jsonResponse(body: unknown, init: ResponseInit): Response {
 }
 
 function clientIp(headers: Headers): string {
-  const forwarded = headers.get("x-forwarded-for")?.trim();
-  if (forwarded) {
-    return forwarded.split(",")[0]?.trim() || "unknown";
+  const cfConnectingIp = headers.get("cf-connecting-ip")?.trim();
+  if (cfConnectingIp) {
+    return cfConnectingIp;
   }
   const realIp = headers.get("x-real-ip")?.trim();
   if (realIp) {
     return realIp;
   }
-  const cfConnectingIp = headers.get("cf-connecting-ip")?.trim();
-  if (cfConnectingIp) {
-    return cfConnectingIp;
+  const forwarded = headers.get("x-forwarded-for")?.trim();
+  if (forwarded) {
+    return forwarded.split(",")[0]?.trim() || "unknown";
   }
   return "unknown";
 }
@@ -227,6 +228,32 @@ function parseBearerToken(authorizationHeader: string | null): string | null {
   return token.length > 0 ? token : null;
 }
 
+function parseSignedAtMs(value: string | null): number | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.trunc(parsed);
+}
+
+function parseGatewayAuthHeaders(headers: Headers): SendGatewayAuth | null {
+  const deviceId = headers.get("x-openclaw-gateway-device-id")?.trim() ?? "";
+  const signature = headers.get("x-openclaw-gateway-signature")?.trim() ?? "";
+  const signedAtMs = parseSignedAtMs(headers.get("x-openclaw-gateway-signed-at-ms"));
+  if (!deviceId || !signature || signedAtMs === null) {
+    return null;
+  }
+  return {
+    deviceId,
+    signature,
+    signedAtMs,
+  };
+}
+
 function isUnauthorizedSendResult(
   value: RelaySendResult | UnauthorizedSendResult,
 ): value is UnauthorizedSendResult {
@@ -328,6 +355,8 @@ export async function handleSendRequest(params: {
   send: (args: {
     request: SendRequestBody;
     sendGrant: string;
+    gatewayAuth: SendGatewayAuth;
+    rawBody: string;
   }) => Promise<RelaySendResult | UnauthorizedSendResult>;
 }): Promise<Response> {
   const subjectHash = await hashSha256(clientIp(params.request.headers));
@@ -342,9 +371,11 @@ export async function handleSendRequest(params: {
     return rateLimited();
   }
 
+  const rawBody = await params.request.text();
+
   let body: SendRequestBody;
   try {
-    body = parseSendRequest(await params.request.json());
+    body = parseSendRequest(JSON.parse(rawBody) as unknown);
   } catch (error) {
     if (error instanceof ZodError) {
       return invalidRequest(error.issues[0]?.message ?? "invalid request");
@@ -361,10 +392,16 @@ export async function handleSendRequest(params: {
   if (!sendGrant) {
     return gatewayUnauthorized("missing or invalid relay send grant");
   }
+  const gatewayAuth = parseGatewayAuthHeaders(params.request.headers);
+  if (!gatewayAuth) {
+    return gatewayUnauthorized("missing or invalid gateway signature");
+  }
 
   const result = await params.send({
     request: body,
     sendGrant,
+    gatewayAuth,
+    rawBody,
   });
   if (isUnauthorizedSendResult(result)) {
     return gatewayUnauthorized(result.message);
