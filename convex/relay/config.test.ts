@@ -57,6 +57,16 @@ describe("loadRelayConfig", () => {
     expect(config.appleReceiptSharedSecret).toBeUndefined();
   });
 
+  it("normalizes quoted APNS_P8 values", () => {
+    const config = loadRelayConfig(
+      makeEnv({
+        APNS_P8: "\"-----BEGIN PRIVATE KEY-----\\nsecret\\n-----END PRIVATE KEY-----\"",
+      }),
+    );
+
+    expect(config.apnsPrivateKey).toBe("-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----");
+  });
+
   it("throws when a required environment variable is missing", () => {
     expect(() => loadRelayConfig(makeEnv({ RELAY_ENC_KEY: "" }))).toThrow(
       "missing required environment variable RELAY_ENC_KEY",

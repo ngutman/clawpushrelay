@@ -63,8 +63,19 @@ function readStringList(name: string, env: NodeJS.ProcessEnv, fallback: string[]
   return values;
 }
 
+function stripMatchingQuotes(value: string): string {
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+
 function normalizePrivateKey(raw: string): string {
-  return raw.replace(/\\n/g, "\n");
+  return stripMatchingQuotes(raw.trim()).replace(/\\n/g, "\n");
 }
 
 export function loadRelayConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
