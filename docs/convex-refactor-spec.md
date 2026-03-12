@@ -252,7 +252,6 @@ Do not reuse the current env names verbatim. Convex environment variable names a
 Use this Convex-specific mapping instead:
 
 - `RELAY_ENC_KEY`
-- `RELAY_GATEWAY_TOKEN`
 - `RELAY_ALLOWED_BUNDLE_IDS`
 - `APPLE_TEAM_ID`
 - `APP_ATTEST_ALLOW_DEV`
@@ -264,6 +263,9 @@ Use this Convex-specific mapping instead:
 - `CHALLENGE_TTL_MS`
 - `RATE_LIMIT_WINDOW_MS`
 - `CHALLENGE_RATE_LIMIT_MAX`
+
+Gateway sends should authenticate with a registration-scoped send grant minted by `register`,
+not a deployment-wide shared bearer token.
 - `REGISTER_RATE_LIMIT_MAX`
 - `SEND_RATE_LIMIT_MAX`
 

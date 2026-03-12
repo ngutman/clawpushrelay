@@ -241,6 +241,7 @@ function buildRegistrationRecord(params: {
   request: RegisterRequestBody;
   receiptEnvironment: string;
   relayHandle: string;
+  sendGrant: string;
   nowMs: number;
   handleTtlMs: number;
   encryptionKey: Buffer;
@@ -258,6 +259,7 @@ function buildRegistrationRecord(params: {
     apnsTokenHash: hashSha256Sync(normalizedToken),
     tokenSuffix: apnsTokenSuffix(normalizedToken),
     relayHandleHash: hashSha256Sync(params.relayHandle),
+    sendGrantHash: hashSha256Sync(params.sendGrant),
     relayHandleExpiresAtMs: params.nowMs + params.handleTtlMs,
     appAttestKeyId: params.request.appAttest.keyId,
     proofType: "receipt",
@@ -300,10 +302,12 @@ export const verifyAndPersistRegistrationInternal = internalAction({
       });
 
       const relayHandle = randomOpaqueToken(32);
+      const sendGrant = randomOpaqueToken(32);
       const registrationRecord = buildRegistrationRecord({
         request: args.request,
         receiptEnvironment: receipt.environment,
         relayHandle,
+        sendGrant,
         nowMs,
         handleTtlMs: config.handleTtlMs,
         encryptionKey: parseEncryptionKey(config.encryptionKey),
@@ -318,6 +322,7 @@ export const verifyAndPersistRegistrationInternal = internalAction({
         ok: true,
         response: {
           relayHandle,
+          sendGrant,
           expiresAtMs: registrationRecord.relayHandleExpiresAtMs,
           tokenSuffix: registrationRecord.tokenSuffix,
           status: "active",

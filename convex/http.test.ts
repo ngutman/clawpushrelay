@@ -11,7 +11,6 @@ import type {
 
 const REQUIRED_ENV: Record<string, string> = {
   RELAY_ENC_KEY: Buffer.alloc(32, 7).toString("base64"),
-  RELAY_GATEWAY_TOKEN: "relay-token",
   RELAY_ALLOWED_BUNDLE_IDS: "ai.openclaw.client",
   APPLE_TEAM_ID: "TEAM123",
   APNS_TEAM_ID: "TEAM123",
@@ -210,6 +209,7 @@ describe("convex HTTP routes", () => {
     };
     const registered: RegisterResponseBody = {
       relayHandle: "relay-handle-1",
+      sendGrant: "send-grant-1",
       expiresAtMs: 1_700_086_400_000,
       tokenSuffix: "90abcdef",
       status: "active",
@@ -476,7 +476,7 @@ describe("convex HTTP routes", () => {
       new Request("https://relay.test/v1/push/send", {
         method: "POST",
         headers: {
-          authorization: "Bearer relay-token",
+          authorization: "Bearer send-grant-1",
           "content-type": "application/json",
           "x-forwarded-for": "203.0.113.10, 10.0.0.1",
         },
@@ -502,10 +502,11 @@ describe("convex HTTP routes", () => {
     expect(getFunctionName(runAction.mock.calls[0]![0])).toBe("relay/sendNode:sendPushInternal");
     expect(runAction.mock.calls[0]![1]).toEqual({
       request: payload,
+      sendGrant: "send-grant-1",
     });
   });
 
-  it("returns unauthorized from POST /v1/push/send when the bearer token is invalid", async () => {
+  it("returns unauthorized from POST /v1/push/send when the send grant is missing", async () => {
     setRequiredEnv();
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
 
@@ -521,7 +522,6 @@ describe("convex HTTP routes", () => {
       new Request("https://relay.test/v1/push/send", {
         method: "POST",
         headers: {
-          authorization: "Bearer wrong-token",
           "content-type": "application/json",
           "x-real-ip": "198.51.100.22",
         },
@@ -532,12 +532,48 @@ describe("convex HTTP routes", () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({
       error: "unauthorized",
-      message: "missing or invalid gateway bearer token",
+      message: "missing or invalid relay send grant",
     });
     expect(runMutation).toHaveBeenCalledTimes(1);
     expect(getFunctionName(runMutation.mock.calls[0]![0])).toBe(
       "relay/internal:consumeSendRateLimitInternal",
     );
     expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it("returns unauthorized from POST /v1/push/send when the send grant is invalid", async () => {
+    setRequiredEnv();
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+
+    const handler = lookupHandler("/v1/push/send", "POST");
+    const runMutation = vi.fn().mockResolvedValue({
+      allowed: true,
+      remaining: 119,
+    });
+    const runAction = vi.fn().mockResolvedValue({
+      unauthorized: true,
+      message: "missing or invalid relay send grant",
+    });
+
+    const response = await handler._handler(
+      { runMutation, runAction } as never,
+      new Request("https://relay.test/v1/push/send", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer wrong-grant",
+          "content-type": "application/json",
+          "x-real-ip": "198.51.100.22",
+        },
+        body: JSON.stringify(makeSendPayload()),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: "unauthorized",
+      message: "missing or invalid relay send grant",
+    });
+    expect(runAction).toHaveBeenCalledTimes(1);
+    expect(getFunctionName(runAction.mock.calls[0]![0])).toBe("relay/sendNode:sendPushInternal");
   });
 });

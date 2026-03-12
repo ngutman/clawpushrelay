@@ -4,7 +4,6 @@ import { loadRelayConfig } from "./config.js";
 function makeEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     RELAY_ENC_KEY: Buffer.alloc(32, 7).toString("base64"),
-    RELAY_GATEWAY_TOKEN: "gateway-token",
     RELAY_ALLOWED_BUNDLE_IDS: "ai.openclaw.client,ai.openclaw.beta",
     APPLE_TEAM_ID: "TEAM123",
     APP_ATTEST_ALLOW_DEV: "true",
@@ -59,8 +58,8 @@ describe("loadRelayConfig", () => {
   });
 
   it("throws when a required environment variable is missing", () => {
-    expect(() => loadRelayConfig(makeEnv({ RELAY_GATEWAY_TOKEN: "" }))).toThrow(
-      "missing required environment variable RELAY_GATEWAY_TOKEN",
+    expect(() => loadRelayConfig(makeEnv({ RELAY_ENC_KEY: "" }))).toThrow(
+      "missing required environment variable RELAY_ENC_KEY",
     );
   });
 

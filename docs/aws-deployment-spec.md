@@ -122,7 +122,6 @@ CLAWPUSHRELAY_PORT=8787
 CLAWPUSHRELAY_TRUST_PROXY=true
 CLAWPUSHRELAY_STATE_DIR=/app/data
 CLAWPUSHRELAY_ENCRYPTION_KEY=<32-byte key in base64 or 64-char hex>
-CLAWPUSHRELAY_GATEWAY_BEARER_TOKEN=<random secret>
 CLAWPUSHRELAY_ALLOWED_BUNDLE_IDS=ai.openclaw.client
 CLAWPUSHRELAY_APPLE_TEAM_ID=<apple team id>
 CLAWPUSHRELAY_APP_ATTEST_ALLOW_DEVELOPMENT=false
@@ -135,7 +134,7 @@ CLAWPUSHRELAY_APNS_PRIVATE_KEY_P8=-----BEGIN PRIVATE KEY-----\n...\n-----END PRI
 Notes:
 
 - Generate `CLAWPUSHRELAY_ENCRYPTION_KEY` once and keep it stable. Restoring `relay-state.json` without the same key will break decryption of stored APNs tokens.
-- Generate `CLAWPUSHRELAY_GATEWAY_BEARER_TOKEN` with high entropy and reuse the same value in the OpenClaw gateway config.
+- Successful registration now mints a registration-scoped send grant, so the gateway no longer needs a deployment-wide relay auth secret.
 - `CLAWPUSHRELAY_TRUST_PROXY=true` is acceptable behind an ALB. If you want a stricter setting, replace it with your VPC CIDR allowlist.
 - Prefer `CLAWPUSHRELAY_APNS_PRIVATE_KEY_P8` over a file path on AWS so the APNs key can stay fully in Secrets Manager.
 
@@ -240,7 +239,6 @@ Gateway:
 
 ```dotenv
 OPENCLAW_APNS_RELAY_BASE_URL=https://relay.example.com
-OPENCLAW_APNS_RELAY_AUTH_TOKEN=<same value as CLAWPUSHRELAY_GATEWAY_BEARER_TOKEN>
 ```
 
 Official iOS builds:

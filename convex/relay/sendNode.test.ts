@@ -7,7 +7,6 @@ import type { RelayRegistrationRecord, RelaySendResult, SendRequestBody } from "
 
 const REQUIRED_ENV: Record<string, string> = {
   RELAY_ENC_KEY: Buffer.alloc(32, 7).toString("base64"),
-  RELAY_GATEWAY_TOKEN: "relay-token",
   RELAY_ALLOWED_BUNDLE_IDS: "ai.openclaw.client",
   APPLE_TEAM_ID: "TEAM123",
   APNS_TEAM_ID: "TEAM123",
@@ -60,6 +59,7 @@ function makeRegistration(
 ): RelayRegistrationRecord {
   const relayHandle = "relay-handle-1";
   const apnsToken = normalizeApnsToken("1234567890ABCDEF1234567890ABCDEF");
+  const sendGrant = "send-grant-1";
   const key = parseEncryptionKey(REQUIRED_ENV.RELAY_ENC_KEY);
 
   return {
@@ -73,6 +73,7 @@ function makeRegistration(
     apnsTokenHash: hashSha256Sync(apnsToken),
     tokenSuffix: apnsTokenSuffix(apnsToken),
     relayHandleHash: hashSha256Sync(relayHandle),
+    sendGrantHash: hashSha256Sync(sendGrant),
     relayHandleExpiresAtMs: 1_700_086_400_000,
     appAttestKeyId: "key-1",
     proofType: "receipt",
@@ -109,7 +110,7 @@ describe("sendPush", () => {
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request },
+      { request, sendGrant: "send-grant-1" },
       {
         now: () => 1_700_000_000_000,
         makeApnsSender: () => ({
@@ -154,7 +155,7 @@ describe("sendPush", () => {
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request: makeSendRequest() },
+      { request: makeSendRequest(), sendGrant: "send-grant-1" },
       {
         now: () => 1_700_000_000_000,
       },
@@ -181,7 +182,7 @@ describe("sendPush", () => {
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request: makeSendRequest() },
+      { request: makeSendRequest(), sendGrant: "send-grant-1" },
       {
         now: () => 1_700_000_000_000,
         makeApnsSender: () => ({
@@ -225,7 +226,7 @@ describe("sendPush", () => {
 
     const result = await sendPush(
       { runQuery, runMutation },
-      { request },
+      { request, sendGrant: "send-grant-1" },
       {
         now: () => 1_700_000_000_000,
         makeApnsSender: () => ({
@@ -244,5 +245,26 @@ describe("sendPush", () => {
       result: sendResult,
       nowMs: 1_700_000_000_000,
     });
+  });
+
+  it("rejects sends with the wrong grant", async () => {
+    setRequiredEnv();
+    const registration = makeRegistration();
+    const runQuery = vi.fn().mockResolvedValue(registration);
+    const runMutation = vi.fn();
+
+    const result = await sendPush(
+      { runQuery, runMutation },
+      { request: makeSendRequest(), sendGrant: "wrong-grant" },
+      {
+        now: () => 1_700_000_000_000,
+      },
+    );
+
+    expect(result).toEqual({
+      unauthorized: true,
+      message: "missing or invalid relay send grant",
+    });
+    expect(runMutation).not.toHaveBeenCalled();
   });
 });

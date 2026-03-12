@@ -19,7 +19,6 @@ Convex will maintain the local project linkage and `convex/_generated`.
 Set these in Convex:
 
 - `RELAY_ENC_KEY`
-- `RELAY_GATEWAY_TOKEN`
 - `RELAY_ALLOWED_BUNDLE_IDS`
 - `APPLE_TEAM_ID`
 - `APP_ATTEST_ALLOW_DEV`
@@ -62,7 +61,6 @@ Then wire:
 
 - iOS app: `OPENCLAW_PUSH_RELAY_BASE_URL=https://relay.example.com`
 - gateway: `OPENCLAW_APNS_RELAY_BASE_URL=https://relay.example.com`
-- gateway auth: `OPENCLAW_APNS_RELAY_AUTH_TOKEN=<same value as RELAY_GATEWAY_TOKEN>`
 
 ## 6. Smoke checks
 
@@ -75,5 +73,7 @@ Then wire:
 - Convex cron pruning handles expired challenges and rate-limit rows.
 - App Attest and APNs logic run in Convex Node actions, so cold starts can add some latency to
   register/send flows.
+- Registration mints a per-registration send grant, so the gateway no longer needs a shared relay
+  auth secret.
 - Manual end-to-end verification still requires a real Convex deployment; local tests only cover
   stubbed Apple dependencies and APNs transport.

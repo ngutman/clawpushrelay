@@ -54,6 +54,7 @@ const registrationRecordValidator = v.object({
   apnsTokenHash: v.string(),
   tokenSuffix: v.string(),
   relayHandleHash: v.string(),
+  sendGrantHash: v.string(),
   relayHandleExpiresAtMs: v.number(),
   appAttestKeyId: v.string(),
   proofType: v.literal("receipt"),

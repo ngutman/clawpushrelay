@@ -9,6 +9,11 @@ import type {
   SendRequestBody,
 } from "./types.js";
 
+type UnauthorizedSendResult = {
+  unauthorized: true;
+  message: string;
+};
+
 export type ChallengeRouteConfig = Pick<
   RelayConfig,
   "challengeTtlMs" | "rateLimitWindowMs" | "challengeRateLimitMax"
@@ -21,7 +26,7 @@ export type RegisterRouteConfig = Pick<
 
 export type SendRouteConfig = Pick<
   RelayConfig,
-  "gatewayBearerToken" | "rateLimitWindowMs" | "sendRateLimitMax"
+  "rateLimitWindowMs" | "sendRateLimitMax"
 >;
 
 export type IssueChallengeArgs = {
@@ -212,6 +217,22 @@ function gatewayUnauthorized(message: string): Response {
   );
 }
 
+function parseBearerToken(authorizationHeader: string | null): string | null {
+  const authorization = authorizationHeader?.trim() ?? "";
+  if (!authorization) {
+    return null;
+  }
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  const token = match?.[1]?.trim() ?? "";
+  return token.length > 0 ? token : null;
+}
+
+function isUnauthorizedSendResult(
+  value: RelaySendResult | UnauthorizedSendResult,
+): value is UnauthorizedSendResult {
+  return "unauthorized" in value && value.unauthorized === true;
+}
+
 export async function handleChallengeRequest(params: {
   request: Request;
   config: ChallengeRouteConfig;
@@ -304,7 +325,10 @@ export async function handleSendRequest(params: {
   request: Request;
   config: SendRouteConfig;
   consumeSendRateLimit: (args: ConsumeSendRateLimitArgs) => Promise<ConsumeSendRateLimitResult>;
-  send: (args: { request: SendRequestBody }) => Promise<RelaySendResult>;
+  send: (args: {
+    request: SendRequestBody;
+    sendGrant: string;
+  }) => Promise<RelaySendResult | UnauthorizedSendResult>;
 }): Promise<Response> {
   const subjectHash = await hashSha256(clientIp(params.request.headers));
   const rateLimit = await params.consumeSendRateLimit({
@@ -316,11 +340,6 @@ export async function handleSendRequest(params: {
 
   if (!rateLimit.allowed) {
     return rateLimited();
-  }
-
-  const authorization = params.request.headers.get("authorization")?.trim() ?? "";
-  if (authorization !== `Bearer ${params.config.gatewayBearerToken}`) {
-    return gatewayUnauthorized("missing or invalid gateway bearer token");
   }
 
   let body: SendRequestBody;
@@ -338,9 +357,18 @@ export async function handleSendRequest(params: {
     return invalidRequest(payloadError);
   }
 
+  const sendGrant = parseBearerToken(params.request.headers.get("authorization"));
+  if (!sendGrant) {
+    return gatewayUnauthorized("missing or invalid relay send grant");
+  }
+
   const result = await params.send({
     request: body,
+    sendGrant,
   });
+  if (isUnauthorizedSendResult(result)) {
+    return gatewayUnauthorized(result.message);
+  }
   return jsonResponse(result, {
     status: result.status,
   });

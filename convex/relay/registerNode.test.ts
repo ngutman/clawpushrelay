@@ -16,7 +16,6 @@ import type { RegisterRequestBody } from "./types.js";
 
 const REQUIRED_ENV: Record<string, string> = {
   RELAY_ENC_KEY: Buffer.alloc(32, 7).toString("base64"),
-  RELAY_GATEWAY_TOKEN: "relay-token",
   RELAY_ALLOWED_BUNDLE_IDS: "ai.openclaw.client",
   APPLE_TEAM_ID: "TEAM123",
   APNS_TEAM_ID: "TEAM123",
@@ -178,6 +177,7 @@ describe("verifyAndPersistRegistrationInternal", () => {
       registrationRecord: {
         apnsTokenCiphertext: string;
         relayHandleHash: string;
+        sendGrantHash: string;
         relayHandleExpiresAtMs: number;
         tokenSuffix: string;
       };
@@ -205,12 +205,16 @@ describe("verifyAndPersistRegistrationInternal", () => {
         ok: true;
         response: {
           relayHandle: string;
+          sendGrant: string;
           expiresAtMs: number;
           tokenSuffix: string;
         };
       };
       expect(mutationArgs.registrationRecord.relayHandleHash).toBe(
         hashSha256Sync(successResult.response.relayHandle),
+      );
+      expect(mutationArgs.registrationRecord.sendGrantHash).toBe(
+        hashSha256Sync(successResult.response.sendGrant),
       );
       expect(mutationArgs.registrationRecord.relayHandleExpiresAtMs).toBe(
         successResult.response.expiresAtMs,

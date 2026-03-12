@@ -1,6 +1,6 @@
 "use node";
 
-import { createHash, createPrivateKey, sign as signJwt } from "node:crypto";
+import { createHash, createPrivateKey, sign as signJwt, timingSafeEqual } from "node:crypto";
 import http2 from "node:http2";
 import { anyApi, internalActionGeneric } from "convex/server";
 import type { GenericActionCtx } from "convex/server";
@@ -22,6 +22,7 @@ const APNS_JWT_TTL_MS = 50 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 const sendRequestValidator = v.object({
+  sendGrant: v.string(),
   request: v.object({
     relayHandle: v.string(),
     pushType: v.union(v.literal("alert"), v.literal("background")),
@@ -76,6 +77,19 @@ type SendPushDeps = {
 };
 
 let cachedJwt: CachedJwt | null = null;
+
+function hasMatchingSendGrant(params: {
+  providedGrant: string;
+  expectedGrantHash: string;
+}): boolean {
+  const providedHash = hashSha256Sync(params.providedGrant);
+  const provided = Buffer.from(providedHash, "utf8");
+  const expected = Buffer.from(params.expectedGrantHash, "utf8");
+  if (provided.length !== expected.length) {
+    return false;
+  }
+  return timingSafeEqual(provided, expected);
+}
 
 function toBase64UrlBytes(value: Uint8Array): string {
   return Buffer.from(value)
@@ -249,10 +263,11 @@ function unregistered(
 export async function sendPush(
   ctx: Pick<GenericActionCtx<any>, "runQuery" | "runMutation">,
   args: {
+    sendGrant: string;
     request: SendRequestBody;
   },
   deps: SendPushDeps = {},
-): Promise<RelaySendResult> {
+): Promise<RelaySendResult | { unauthorized: true; message: string }> {
   const now = deps.now ?? (() => Date.now());
   const configLoader = deps.loadConfig ?? loadRelayConfig;
   const config = configLoader();
@@ -263,6 +278,13 @@ export async function sendPush(
 
   if (!registration) {
     return unregistered(null);
+  }
+
+  if (!hasMatchingSendGrant({ providedGrant: args.sendGrant, expectedGrantHash: registration.sendGrantHash })) {
+    return {
+      unauthorized: true,
+      message: "missing or invalid relay send grant",
+    };
   }
 
   const nowMs = now();

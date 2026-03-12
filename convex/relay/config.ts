@@ -1,6 +1,5 @@
 export type RelayConfig = {
   encryptionKey: string;
-  gatewayBearerToken: string;
   allowedBundleIds: string[];
   appleTeamId: string;
   appAttestAllowDevelopment: boolean;
@@ -71,7 +70,6 @@ function normalizePrivateKey(raw: string): string {
 export function loadRelayConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
   return {
     encryptionKey: readString("RELAY_ENC_KEY", env),
-    gatewayBearerToken: readString("RELAY_GATEWAY_TOKEN", env),
     allowedBundleIds: readStringList("RELAY_ALLOWED_BUNDLE_IDS", env, ["ai.openclaw.client"]),
     appleTeamId: readString("APPLE_TEAM_ID", env),
     appAttestAllowDevelopment: readBoolean("APP_ATTEST_ALLOW_DEV", env, false),

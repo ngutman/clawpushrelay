@@ -2,8 +2,8 @@
 
 `clawpushrelay` is a Convex-backed APNs relay for official OpenClaw iOS builds. It owns
 production APNs credentials, verifies App Attest plus App Store receipt proof during
-registration, stores APNs tokens encrypted at rest, and returns opaque relay handles to the
-OpenClaw gateway for alert and wake pushes.
+registration, stores APNs tokens encrypted at rest, and returns opaque relay handles plus
+scoped send grants to the OpenClaw gateway for alert and wake pushes.
 
 ## Endpoints
 
@@ -26,8 +26,6 @@ Set these on the Convex deployment, not in application code:
 
 - `RELAY_ENC_KEY`
   32-byte encryption key encoded as base64/base64url or 64-char hex.
-- `RELAY_GATEWAY_TOKEN`
-  Bearer token required on `POST /v1/push/send`.
 - `RELAY_ALLOWED_BUNDLE_IDS`
   Comma-separated allowlist. Default intended value: `ai.openclaw.client`.
 - `APPLE_TEAM_ID`
@@ -83,7 +81,6 @@ For the full bootstrap, env, custom-domain, and smoke-test flow, see
 Set these in the OpenClaw gateway environment:
 
 - `OPENCLAW_APNS_RELAY_BASE_URL=https://relay.example.com`
-- `OPENCLAW_APNS_RELAY_AUTH_TOKEN=<same value as RELAY_GATEWAY_TOKEN>`
 
 Set this in official iOS builds:
 
@@ -96,7 +93,8 @@ Local Xcode installs should continue using direct APNs registration and do not n
 - `register` accepts only `production` / `official` registrations.
 - `register` rejects requests when App Attest verification fails.
 - `register` rejects requests when Apple receipt validation fails.
-- `send` rejects requests without the configured gateway bearer token.
+- successful registration returns a per-registration send grant that the app forwards to the paired gateway.
+- `send` rejects requests without the current registration's send grant.
 - APNs tokens are encrypted at rest.
 - Relay handles are stored server-side only as SHA-256 hashes.
 

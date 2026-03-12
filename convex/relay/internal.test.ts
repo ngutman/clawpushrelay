@@ -23,6 +23,7 @@ function makeRegistration(
     apnsTokenHash: "token-hash",
     tokenSuffix: "90abcdef",
     relayHandleHash: "handle-hash",
+    sendGrantHash: "send-grant-hash",
     relayHandleExpiresAtMs: 10_000,
     appAttestKeyId: "key-1",
     proofType: "receipt",

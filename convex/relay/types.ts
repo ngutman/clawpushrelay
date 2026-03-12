@@ -39,6 +39,7 @@ export type RelayRegistrationRecord = {
   apnsTokenHash: string;
   tokenSuffix: string;
   relayHandleHash: string;
+  sendGrantHash: string;
   relayHandleExpiresAtMs: number;
   appAttestKeyId: string;
   proofType: "receipt";
@@ -75,6 +76,7 @@ export type RegisterRequestBody = {
 
 export type RegisterResponseBody = {
   relayHandle: string;
+  sendGrant: string;
   expiresAtMs: number;
   tokenSuffix: string;
   status: "active";
