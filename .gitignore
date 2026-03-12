@@ -2,5 +2,7 @@ node_modules
 coverage
 dist
 .DS_Store
-data
-.env.local
+.env*
+!.env.example
+*.p8
+.convex

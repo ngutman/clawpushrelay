@@ -1,3 +1,5 @@
+"use node";
+
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 function toBase64Url(value: Uint8Array): string {
@@ -21,17 +23,13 @@ export function parseEncryptionKey(raw: string): Buffer {
   }
   const buffer = Buffer.from(trimmed.replace(/-/g, "+").replace(/_/g, "/"), "base64");
   if (buffer.length !== 32) {
-    throw new Error("CLAWPUSHRELAY_ENCRYPTION_KEY must decode to 32 bytes");
+    throw new Error("RELAY_ENC_KEY must decode to 32 bytes");
   }
   return buffer;
 }
 
-export function hashSha256(value: string): string {
+export function hashSha256Sync(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-export function encodeSha256Base64Url(value: string): string {
-  return toBase64Url(createHash("sha256").update(value, "utf8").digest());
 }
 
 export function encryptString(plaintext: string, key: Buffer): string {
@@ -58,9 +56,4 @@ export function decryptString(ciphertext: string, key: Buffer): string {
 
 export function randomOpaqueToken(bytes: number): string {
   return toBase64Url(randomBytes(bytes));
-}
-
-export function apnsTokenSuffix(token: string): string {
-  const normalized = token.trim().replace(/[<>\s]/g, "").toLowerCase();
-  return normalized.slice(-8);
 }

@@ -1,15 +1,3 @@
 {
-  "compilerOptions": {
-    "target": "ES2023",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2023"],
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
-    "types": ["node", "vitest/globals"]
-  },
-  "include": ["src/**/*.ts"]
+  "extends": "./convex/tsconfig.json"
 }

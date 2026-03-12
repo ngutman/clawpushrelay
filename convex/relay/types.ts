@@ -6,11 +6,14 @@ export type PushType = "alert" | "background";
 
 export type RegistrationStatus = "active" | "stale" | "revoked";
 
+export type RateLimitScope = "challenge" | "register" | "send";
+
 export type ChallengeRecord = {
   challengeId: string;
   challenge: string;
   createdAtMs: number;
   expiresAtMs: number;
+  consumedAtMs?: number;
 };
 
 export type AppAttestRecord = {
@@ -50,12 +53,6 @@ export type RelayRegistrationRecord = {
   lastApnsReason?: string;
 };
 
-export type RelayState = {
-  version: 1;
-  appAttestKeysById: Record<string, AppAttestRecord>;
-  registrationsByHandleHash: Record<string, RelayRegistrationRecord>;
-};
-
 export type RegisterRequestBody = {
   challengeId: string;
   installationId: string;
@@ -82,6 +79,17 @@ export type RegisterResponseBody = {
   tokenSuffix: string;
   status: "active";
 };
+
+export type RegisterActionResult =
+  | {
+      ok: true;
+      response: RegisterResponseBody;
+    }
+  | {
+      ok: false;
+      error: "unauthorized" | "service_unavailable";
+      message: string;
+    };
 
 export type SendRequestBody = {
   relayHandle: string;
